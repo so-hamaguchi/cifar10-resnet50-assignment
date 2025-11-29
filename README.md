@@ -9,7 +9,7 @@
 
 ## 実験結果
 
-転移学習（Two-Stage Training）と学習率スケジューリングの導入により、検証データ（Validation）において高い精度を達成しました。
+転移学習（全層ファインチューニング）と学習率スケジューリングなどの導入により、検証データの精度をかなり高めることができました。
 
 | モデル設定 | Epochs | 手法 | Best Val Acc |
 | :--- | :---: | :--- | :---: |
@@ -18,10 +18,12 @@
 
 ### 学習曲線の推移
 ![Learning Curve](images/loss_accuracy_curve.png)
-*図1: 最終モデルにおけるAccuracyとLossの推移（WandBより出力）*
+
+*図1: 最終モデルにおけるAccuracyとLossの推移*
 
 ### 混同行列 (Confusion Matrix)
 ![Confusion Matrix](images/confusion_matrix.png)
+
 *図2: クラスごとの予測精度。CatとDogの間でわずかな誤分類が見られるものの、全体として極めて高い分類能力を示している。*
 
 
@@ -45,12 +47,11 @@
 ├── requirements.txt   # 依存ライブラリ
 ├── README.md          # ドキュメント
 ├── images/            # 実験結果の画像（グラフなど）
-│   └── loss_curve.png
-├── notebooks/         # 実験用ノートブック
-│   ├── experiment_log.ipynb
-│   └── trial_and_error.ipynb
-├── weights/           # 学習済みモデル置き場（任意）
-│   └── best_model.pth
+│   ├── loss_accuracy_curve.png
+│   └── confusion_matrix.png
+├── notebooks/         # 実験用ノートブック（全９ファイル）
+├── weights/           # 学習済みモデル
+│   └── model_for_submission6.pth
 └── slides/
     └── report.pdf     # レポート用スライド（後で追加）
 ```
