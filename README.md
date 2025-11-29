@@ -28,14 +28,14 @@
 
 
 
-## ⒈ 環境構築
+## 環境構築
 - python 3.10以降
 
 - pytorch/torchvision
 
 - WandB (ログ管理用)
 
-必要なライブラリは'requirements.txt'をご参照ください。
+必要なライブラリは`requirements.txt`をご参照ください。
 
 
 ### ディレクトリ構成
@@ -51,7 +51,7 @@
 │   └── confusion_matrix.png
 ├── notebooks/         # 実験用ノートブック（全９ファイル）
 ├── weights/           # 学習済みモデル
-│   └── model_for_submission6.pth
+│   └── best_model.pth
 └── slides/
     └── report.pdf     # レポート用スライド（後で追加）
 ```
@@ -68,10 +68,39 @@ pip install -r requirements.txt
 ```
 
 ### 学習実行手順
+- デフォルト実行
 
 ```
 python train.py
 ```
+
+- W&Bにログを記録したい場合（任意）
+
+```
+# W&Bにログイン
+wandb login
+
+python train.py --use_wandb
+
+# --log_imagesとすると誤分類画像が毎エポック記録されます。必要な場合はご使用ください。
+```
+
+- ハイパーパラメータの変更
+
+```
+#例（random_seedはデフォルトで42です）
+python train.py --epochs 12 --batch_size 64 --seed 42
+```
+
+### 出力（Outputs）
+`python train.py` の実行後、以下が自動生成されます。
+
+- `outputs/checkpoints/resnet50_cifar10.pth`（学習済み重み）
+- `outputs/log.csv`（各epochの指標）
+- `outputs/figures/`（混同行列など：W&B無効時）
+
+推論の際に重みを使用される場合はパスの変更をお願いします。
+
 
 ### 推論実行手順
 
@@ -79,6 +108,8 @@ python train.py
 
 ```
 # 実行例
-python predict.py --image samples/cat.jpg --weights weights/model_for_submission6.pth
+python predict.py --image samples/cat.jpg --weights weights/best_model.pth
+
+# --deviceでcpu/cudaが選べます。デフォルトはautoです。
 ```
 
