@@ -79,6 +79,6 @@ python train.py
 
 ```
 # 実行例
-python predict.py --image test_image.jpg --weights experiment_adjustment2.pth
+python predict.py --image samples/cat.jpg --weights weights/model_for_submission6.pth
 ```
 

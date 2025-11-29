@@ -1,5 +1,5 @@
-torch==2.9.0+cu126
-torchvision==0.24.0+cu126
+torch==2.9.0
+torchvision==0.24.0
 numpy==2.0.2
 matplotlib==3.10.0
 seaborn==0.13.2
