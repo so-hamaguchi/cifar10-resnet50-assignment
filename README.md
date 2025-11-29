@@ -88,18 +88,17 @@ python train.py --use_wandb
 - ハイパーパラメータの変更
 
 ```
-#例（random_seedはデフォルトで42です）
+#例
 python train.py --epochs 12 --batch_size 64 --seed 42
 ```
+Out of Memoryになってしまう場合はbatch_sizeを32などに下げてください。
 
 ### 出力
 `python train.py` の実行後、以下が自動生成されます。
 
-- `outputs/checkpoints/resnet50_cifar10.pth`（学習済み重み）
-- `outputs/log.csv`（各epochの指標）
-- `outputs/figures/`（混同行列など：W&B無効時）
-
-推論の際に重みを使用される場合はパスの変更をお願いします。
+- 学習済み重み：`outputs/checkpoints/resnet50_cifar10.pth`
+- 学習のログ：`outputs/log.csv`
+- 図：`outputs/figures/`（混同行列など：W&B無効時）
 
 
 ## 推論実行手順
@@ -109,7 +108,29 @@ python train.py --epochs 12 --batch_size 64 --seed 42
 ```
 # 実行例
 python predict.py --image samples/cat.jpg --weights weights/best_model.pth
+```
+さらに、--deviceでcpu/cudaが選べます。デフォルトはautoです。
 
-# --deviceでcpu/cudaが選べます。デフォルトはautoです。
+*上記にもありますが、学習完了後、学習済みモデルは `outputs/checkpoints/` に保存されます。
+
+そのため、そのモデルを推論で使用される場合は以下のようにパスの変更をお願いします。
+
+```
+# 実行例
+python predict.py --image samples/cat.jpg --weights outputs/checkpoints/resnet50_cifar10.pth
 ```
 
+## 再現性
+- 乱数シードはデフォルトで `42` に固定しています。（`--seed` で変更可能）
+- 再現性重視のため、cuDNNの設定を固定しています。
+
+## 改善施策（Summary）
+- Data Augmentation: flip/crop/rotate
+- Regularization: weight decay
+- Transfer Learning: ImageNet pretrained ResNet50, full fine-tuning
+- LR Scheduler: CosineAnnealingLR
+
+/Notebookのフォルダの中にそれぞれの改善施策の実験ノートブックが格納されています。
+
+## License
+MIT License (see `LICENSE`)
