@@ -135,5 +135,9 @@ python predict.py --image samples/cat.jpg --weights outputs/checkpoints/resnet50
 
 /Notebookのフォルダの中にそれぞれの改善施策の実験ノートブックが格納されています。
 
+## W&B 実験ログ
+- Project: https://wandb.ai/so-hamaguchi-student/cifar10-resnet?nw=nwusersohamaguchi
+- Best run: https://wandb.ai/so-hamaguchi-student/cifar10-resnet/runs/oxsv8ssg?nw=nwusersohamaguchi
+
 ## License
 MIT License
