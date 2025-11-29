@@ -91,7 +91,7 @@ python train.py --use_wandb
 #例
 python train.py --epochs 12 --batch_size 64 --seed 42
 ```
-Out of Memoryになってしまう場合は、batch_sizeを32などに下げてください。
+Out of Memoryになってしまう場合は、batch_sizeを32などに下げてお試しください。
 
 ### 出力
 `python train.py` の実行後、以下が自動生成されます。
@@ -104,6 +104,7 @@ Out of Memoryになってしまう場合は、batch_sizeを32などに下げて�
 ## 推論実行手順
 
 学習済みモデルを使用して、画像のクラス分類を行います。
+リポジトリに含まれている精度97.7%のモデルを使用する場合は、下記のように実行してください
 
 ```
 # 実行例
@@ -111,7 +112,9 @@ python predict.py --image samples/cat.jpg --weights weights/best_model.pth
 ```
 さらに、--deviceでcpu/cudaが選べます。デフォルトはautoです。
 
-※上記にもありますが、学習完了後、学習済みモデルは `outputs/checkpoints/` に保存されます。
+
+
+ご自身で train.py を実行して生成されたモデルを使用する場合、学習済みモデルは `outputs/checkpoints/` に保存されます。
 
 そのため、そのモデルを推論で使用される場合は以下のようにパスの変更をお願いします。
 
