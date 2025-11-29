@@ -42,7 +42,7 @@
 
 ```text
 .
-├── train.py           # 学習用スクリプト（ResNet50転移学習）
+├── train.py           # 学習用スクリプト
 ├── predict.py         # 推論用スクリプト
 ├── requirements.txt   # 依存ライブラリ
 ├── README.md          # ドキュメント
@@ -67,7 +67,7 @@ cd cifar10-resnet50-assignment
 pip install -r requirements.txt
 ```
 
-### 学習実行手順
+## 学習実行手順
 - デフォルト実行
 
 ```
@@ -92,7 +92,7 @@ python train.py --use_wandb
 python train.py --epochs 12 --batch_size 64 --seed 42
 ```
 
-### 出力（Outputs）
+### 出力
 `python train.py` の実行後、以下が自動生成されます。
 
 - `outputs/checkpoints/resnet50_cifar10.pth`（学習済み重み）
@@ -102,7 +102,7 @@ python train.py --epochs 12 --batch_size 64 --seed 42
 推論の際に重みを使用される場合はパスの変更をお願いします。
 
 
-### 推論実行手順
+## 推論実行手順
 
 学習済みモデルを使用して、画像のクラス分類を行います。
 
