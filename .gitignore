@@ -1,0 +1,13 @@
+# Pythonのゴミファイル
+__pycache__/
+*.py[cod]
+
+# Jupyter Notebookのゴミ
+.ipynb_checkpoints/
+
+# WandBのログフォルダ（重いので除外）
+wandb/
+
+# OSのゴミファイル
+.DS_Store
+Thumbs.db
