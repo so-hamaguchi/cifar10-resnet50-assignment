@@ -46,13 +46,15 @@
 ├── predict.py         # 推論用スクリプト
 ├── requirements.txt   # 依存ライブラリ
 ├── README.md          # ドキュメント
-├── images/            # 実験結果の画像（グラフなど）
-│   ├── loss_accuracy_curve.png
-│   └── confusion_matrix.png
+├── images/            # 実験結果の画像
+│   ├── loss_accuracy_curve_base.png # 97.7%モデルの学習曲線（配布用）
+│   ├── confusion_matrix_base.png    # 97.7%モデルの混同行列（配布用）
+│   ├── loss_accuracy_curve.png      # train.py実行時に生成される
+│   └── confusion_matrix.png         # train.py実行時に生成される
 ├── notebooks/         # 実験用ノートブック（全９ファイル）
 ├── weights/           # 学習済みモデル
-│   ├── best_model_base.pth # 97.7%達成のモデル
-│   └── best_model.pth # 学習をあなたの環境で行ったとき作成
+│   ├── best_model_base.pth # 97.7%達成のモデル（配布用）
+│   └── best_model.pth      # train.py実行時に生成される
 └── slides/
     └── report.pdf     # レポート用スライド
 ```
