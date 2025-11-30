@@ -142,7 +142,6 @@ python predict.py --image samples/cat.jpg --weights weights/best_model.pth
 
 ## W&B 実験ログ
 - Project: https://wandb.ai/so-hamaguchi-student/cifar10-resnet?nw=nwusersohamaguchi
-- Best run: https://wandb.ai/so-hamaguchi-student/cifar10-resnet/runs/oxsv8ssg?nw=nwusersohamaguchi
 
 ## License
 MIT License
