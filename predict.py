@@ -31,7 +31,7 @@ def get_args():
     parser.add_argument(
         "--weights",
         type=str,
-        default="experiment_adjustment.pth",
+        default="weights/best_model_base.pth",
         help="Path to the trained model weights (.pth)",
     )
     parser.add_argument(
