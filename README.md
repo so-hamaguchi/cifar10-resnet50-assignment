@@ -14,7 +14,7 @@
 | モデル設定 | Epochs | 手法 | Best Val Acc |
 | :--- | :---: | :--- | :---: |
 | Baseline (scratch) | 15 | スクラッチ学習・正規化のみ | 67.2% |
-| **Final Model** | **12** | **データ拡張・正則化 + 全層FT + CosineScheduler** | **97.7%**|
+| **Final Model** | **15** | **データ拡張・正則化 + 全層FT + CosineScheduler** | **97.7%**|
 
 ### 学習曲線の推移
 ![Learning Curve](images/loss_accuracy_curve.png)
@@ -53,7 +53,7 @@
 ├── weights/           # 学習済みモデル
 │   └── best_model.pth
 └── slides/
-    └── report.pdf     # レポート用スライド（後で追加）
+    └── report.pdf     # レポート用スライド
 ```
 
 ### インストール手順
