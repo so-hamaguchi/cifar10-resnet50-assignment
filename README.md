@@ -51,7 +51,8 @@
 │   └── confusion_matrix.png
 ├── notebooks/         # 実験用ノートブック（全９ファイル）
 ├── weights/           # 学習済みモデル
-│   └── best_model.pth
+│   ├── best_model_base.pth # 97.7%達成のモデル
+│   └── best_model.pth # 学習をあなたの環境で行ったとき作成
 └── slides/
     └── report.pdf     # レポート用スライド
 ```
@@ -81,8 +82,6 @@ python train.py
 wandb login
 
 python train.py --use_wandb
-
-# --log_imagesとすると誤分類画像が毎エポック記録されます。必要な場合はご使用ください。
 ```
 
 - ハイパーパラメータの変更
@@ -96,31 +95,35 @@ Out of Memoryになってしまう場合は、batch_sizeを32などに下げて�
 ### 出力
 `python train.py` の実行後、以下が自動生成されます。
 
-- 学習済み重み：`outputs/checkpoints/resnet50_cifar10.pth`
-- 学習のログ：`outputs/log.csv`
-- 図：`outputs/figures/`（混同行列など：W&B無効時）
-
+- 学習済み重み：`weights/best_model.pth`
+- 学習のログ：`images/loss_accuracy_curve.png`
+- 最終epochでの混同行列：`images/confusion_matrix.png`
 
 ## 推論実行手順
 
 学習済みモデルを使用して、画像のクラス分類を行います。
-リポジトリに含まれている精度97.7%のモデルを使用する場合は、下記のように実行してください
+- 猫の画像
+
+```
+# 実行例
+python predict.py --image samples/cat.jpg --weights weights/best_model_base.pth
+```
+
+- 船の画像
+
+```
+# 実行例
+python predict.py --image samples/ship.jpg --weights weights/best_model_base.pth
+```
+
+
+
+ご自身で train.py を実行して生成されたモデルを使用する場合、学習済みモデルは `best_model.pth` と保存されます。
+以下のように、変更をお願いします。
 
 ```
 # 実行例
 python predict.py --image samples/cat.jpg --weights weights/best_model.pth
-```
-さらに、--deviceでcpu/cudaが選べます。デフォルトはautoです。
-
-
-
-ご自身で train.py を実行して生成されたモデルを使用する場合、学習済みモデルは `outputs/checkpoints/` に保存されます。
-
-そのため、そのモデルを推論で使用される場合は以下のようにパスの変更をお願いします。
-
-```
-# 実行例
-python predict.py --image samples/cat.jpg --weights outputs/checkpoints/resnet50_cifar10.pth
 ```
 
 ## 再現性

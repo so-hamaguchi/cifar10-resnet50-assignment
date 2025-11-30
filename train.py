@@ -1,95 +1,24 @@
-"""
-ResNet50を用いたCIFAR-10画像分類モデルの学習スクリプト。
-
-Features:
-- Transfer Learning: ResNet50 (ImageNet pretrained)
-- GPU-accelerated augmentation using torchvision.transforms.v2
-- Cosine Annealing LR scheduler
-- Optional experiment tracking with Weights & Biases (W&B)
-  - Enable by passing: --use_wandb
-  - Otherwise runs with W&B disabled (no login required)
-
-Usage:
-    python train.py
-    python train.py --use_wandb
-"""
-
-from __future__ import annotations
-
 import argparse
 import os
 import random
-import csv
-from dataclasses import dataclass
-from pathlib import Path
-from typing import List, Tuple
-
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from sklearn.metrics import confusion_matrix, precision_recall_fscore_support
 from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
+from torchvision import datasets, transforms, models
 from torchvision.models import ResNet50_Weights, resnet50
-from torchvision.transforms import v2
-
+from torch.optim.lr_scheduler import CosineAnnealingLR
+from sklearn.metrics import precision_recall_fscore_support, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
 import wandb
 
+# クラス名の定義
+CLASS_NAMES = ("plane", "car", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck")
 
-CLASSES = (
-    "plane",
-    "car",
-    "bird",
-    "cat",
-    "deer",
-    "dog",
-    "frog",
-    "horse",
-    "ship",
-    "truck",
-)
-
-
-@dataclass(frozen=True)
-class Config:
-    """Training configuration."""
-
-    learning_rate: float = 1e-4
-    batch_size: int = 256
-    epochs: int = 12
-    weight_decay: float = 1e-4
-    optimizer: str = "Adam"
-    architecture: str = "ResNet50"
-    dataset: str = "CIFAR-10"
-    augmentation: str = "v2_gpu_flip_crop_rotate"
-    note: str = "全層FT + CosineAnnealingLR + GPU Augmentation"
-    seed: int = 42
-    num_workers: int = 2
-    out_dir: str = "outputs"
-    save_name: str = "resnet50_cifar10.pth"  # saved under out_dir/checkpoints/
-
-
-def parse_args() -> argparse.Namespace:
-    """Parse CLI arguments."""
-    p = argparse.ArgumentParser(description="CIFAR-10 training with ResNet50")
-    p.add_argument("--use_wandb", action="store_true", help="Enable W&B logging (no login required if API key is set).")
-    p.add_argument("--epochs", type=int, default=None, help="Override epochs in config.")
-    p.add_argument("--batch_size", type=int, default=None, help="Override batch_size in config.")
-    p.add_argument("--seed", type=int, default=None, help="Override seed in config.")
-    p.add_argument("--log_images", action="store_true", help="Log misclassified images (default: last epoch only).")
-    return p.parse_args()
-
-
-def set_seed(seed: int) -> None:
-    """Fix random seeds for reproducibility.
-
-    Notes:
-        cudnn.deterministic=True improves reproducibility but can slow training.
-        cudnn.benchmark=False avoids non-deterministic algorithm selection.
-    """
+def set_seed(seed=42):
+    """再現性のためにシードを固定する"""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -98,324 +27,254 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+    print(f"Seed set to {seed}")
 
+def get_transforms():
+    """データの前処理と拡張を定義する"""
+    # 学習用：データ拡張あり
+    # Resize((224, 224))と明示することで、意図しないアスペクト比の変更を防ぐ
+    train_transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(5),
+        transforms.RandomCrop(224, padding=3),
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+    ])
+    
+    # 検証用：リサイズと正規化のみ
+    val_transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+    ])
+    
+    return train_transform, val_transform
 
-def get_device() -> torch.device:
-    """Return the best available device."""
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def get_dataloaders(batch_size, train_transform, val_transform, num_workers=2):
+    """データローダーを作成する"""
+    train_dataset = datasets.CIFAR10(root="./data", train=True, download=True, transform=train_transform)
+    val_dataset = datasets.CIFAR10(root="./data", train=False, download=True, transform=val_transform)
 
-
-def get_gpu_transforms(device: torch.device) -> tuple[v2.Compose, v2.Compose]:
-    """Build GPU-side transforms (v2 API).
-
-    - Resize to 224x224 to match ImageNet-pretrained ResNet50 input resolution.
-    - Normalize with ImageNet mean/std.
-    """
-    # Train: augmentation
-    train_t = v2.Compose(
-        [
-            v2.Resize((224, 224), antialias=True),
-            v2.RandomHorizontalFlip(p=0.5),
-            v2.RandomRotation(degrees=5),
-            v2.RandomCrop((224, 224), padding=3),
-            v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ]
-    ).to(device)
-
-    # Val: deterministic
-    val_t = v2.Compose(
-        [
-            v2.Resize((224, 224), antialias=True),
-            v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ]
-    ).to(device)
-
-    return train_t, val_t
-
-
-def get_dataloaders(batch_size: int, num_workers: int) -> tuple[DataLoader, DataLoader]:
-    """Create DataLoaders.
-    CPU-side does only ToTensor; heavy transforms run on GPU via v2.
-    """
-    base_transform = transforms.Compose([transforms.ToTensor()])
-
-    train_ds = datasets.CIFAR10(root="./data", train=True, download=True, transform=base_transform)
-    val_ds = datasets.CIFAR10(root="./data", train=False, download=True, transform=base_transform)
+    # GPUが利用可能な場合は pin_memory=True にしてホストメモリ上のデータをページロックし、
+    # GPUへの転送効率を上げる
+    use_pin_memory = torch.cuda.is_available()
 
     train_loader = DataLoader(
-        train_ds,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers,
-        pin_memory=True,
+        train_dataset, 
+        batch_size=batch_size, 
+        shuffle=True, 
+        num_workers=num_workers, 
+        pin_memory=use_pin_memory
     )
     val_loader = DataLoader(
-        val_ds,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=True,
+        val_dataset, 
+        batch_size=batch_size, 
+        shuffle=False, 
+        num_workers=num_workers, 
+        pin_memory=use_pin_memory
     )
+
     return train_loader, val_loader
 
-
-def build_model(device: torch.device) -> nn.Module:
-    """Build ResNet50 for CIFAR-10."""
+def build_model(device):
+    """ResNet50モデルを構築し、最終層をCIFAR-10用に変更する"""
     model = resnet50(weights=ResNet50_Weights.DEFAULT)
+    # CIFAR-10は10クラスなので出力数を変更
     model.fc = nn.Linear(model.fc.in_features, 10)
-    return model.to(device)
+    model = model.to(device)
+    return model
 
-
-def train_one_epoch(
-    model: nn.Module,
-    loader: DataLoader,
-    criterion: nn.Module,
-    optimizer: optim.Optimizer,
-    gpu_transform: v2.Compose,
-    device: torch.device,
-) -> tuple[float, float]:
-    """Train for one epoch and return (loss, accuracy)."""
+def train_one_epoch(model, dataloader, criterion, optimizer, device):
+    """1エポック分の学習を実行する"""
     model.train()
-    loss_sum = 0.0
-    acc_sum = 0.0
+    running_loss = 0.0
+    running_acc = 0.0
+    
+    for imgs, labels in dataloader:
+        # non_blocking=True でデータ転送待ちによるブロッキングを防ぐ
+        imgs, labels = imgs.to(device, non_blocking=True), labels.to(device, non_blocking=True)
 
-    for imgs, labels in loader:
-        imgs = imgs.to(device, non_blocking=True)
-        labels = labels.to(device, non_blocking=True)
-
-        imgs = gpu_transform(imgs)
-
-        optimizer.zero_grad(set_to_none=True)
-        logits = model(imgs)
-        loss = criterion(logits, labels)
+        optimizer.zero_grad()
+        output = model(imgs)
+        loss = criterion(output, labels)
         loss.backward()
         optimizer.step()
 
-        loss_sum += float(loss.item())
-        preds = torch.argmax(logits, dim=1)
-        acc_sum += float((preds == labels).float().mean().item())
+        running_loss += loss.item()
+        pred = torch.argmax(output, dim=1)
+        running_acc += torch.mean(pred.eq(labels).float()).item()
 
-    return loss_sum / len(loader), acc_sum / len(loader)
+    avg_loss = running_loss / len(dataloader)
+    avg_acc = running_acc / len(dataloader)
+    return avg_loss, avg_acc
 
-
-def validate(
-    model: nn.Module,
-    loader: DataLoader,
-    criterion: nn.Module,
-    gpu_transform: v2.Compose,
-    device: torch.device,
-    collect_misclassified: bool = False,
-    max_misclassified: int = 32,
-) -> dict:
-    """Validate and return metrics.
-
-    Returns:
-        dict with keys: loss, acc, precision, recall, f1, cm, misclassified
-        misclassified is List[Tuple[np.ndarray, str]] (image, caption) if collected.
-    """
+def validate(model, dataloader, criterion, device):
+    """検証を実行する"""
     model.eval()
-    loss_sum = 0.0
-    acc_sum = 0.0
-    all_preds: List[int] = []
-    all_labels: List[int] = []
-    misclassified: List[Tuple[np.ndarray, str]] = []
-
-    # inverse normalize for visualization
-    mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(1, 3, 1, 1)
-    std = torch.tensor([0.229, 0.224, 0.225], device=device).view(1, 3, 1, 1)
+    running_loss = 0.0
+    running_acc = 0.0
+    all_preds = []
+    all_labels = []
 
     with torch.no_grad():
-        for imgs, labels in loader:
-            imgs = imgs.to(device, non_blocking=True)
-            labels = labels.to(device, non_blocking=True)
+        for imgs, labels in dataloader:
+            # non_blocking=True
+            imgs, labels = imgs.to(device, non_blocking=True), labels.to(device, non_blocking=True)
+            
+            output = model(imgs)
+            loss = criterion(output, labels)
+            
+            running_loss += loss.item()
+            pred = torch.argmax(output, dim=1)
+            running_acc += torch.mean(pred.eq(labels).float()).item()
+            
+            all_preds.extend(pred.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
 
-            imgs_t = gpu_transform(imgs)
-            logits = model(imgs_t)
-            loss = criterion(logits, labels)
+    avg_loss = running_loss / len(dataloader)
+    avg_acc = running_acc / len(dataloader)
+    
+    # 返り値の順序を修正: ラベル(正解), 予測 の順にする
+    return avg_loss, avg_acc, all_labels, all_preds
 
-            loss_sum += float(loss.item())
-            preds = torch.argmax(logits, dim=1)
-            acc_sum += float((preds == labels).float().mean().item())
+def save_plots(train_losses, val_losses, train_accs, val_accs, all_labels, all_preds, output_dir="images"):
+    """学習曲線と混同行列を保存する"""
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Loss & Accuracy Curve
+    epochs_range = range(1, len(train_losses) + 1)
+    plt.figure(figsize=(14, 5))
 
-            all_preds.extend(preds.detach().cpu().tolist())
-            all_labels.extend(labels.detach().cpu().tolist())
+    # Accuracy
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs_range, train_accs, label='Train Acc', marker='o')
+    plt.plot(epochs_range, val_accs, label='Val Acc', marker='o')
+    plt.title('Accuracy: Train vs Val')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.grid(True)
 
-            if collect_misclassified and len(misclassified) < max_misclassified:
-                mistakes = preds != labels
-                idxs = mistakes.nonzero(as_tuple=True)[0]
-                for idx in idxs:
-                    if len(misclassified) >= max_misclassified:
-                        break
-                    # de-normalize
-                    img = imgs_t[idx : idx + 1] * std + mean  # [1,3,H,W]
-                    img_np = img.squeeze(0).detach().clamp(0, 1).permute(1, 2, 0).cpu().numpy()
-                    cap = f"Pred: {CLASSES[preds[idx].item()]}, True: {CLASSES[labels[idx].item()]}"
-                    misclassified.append((img_np, cap))
+    # Loss
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs_range, train_losses, label='Train Loss', marker='o')
+    plt.plot(epochs_range, val_losses, label='Val Loss', marker='o')
+    plt.title('Loss: Train vs Val')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, "loss_accuracy_curve.png"))
+    plt.close()
 
-    precision, recall, f1, _ = precision_recall_fscore_support(
-        all_labels, all_preds, average="macro", zero_division=0
-    )
+    # Confusion Matrix
     cm = confusion_matrix(all_labels, all_preds)
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=CLASS_NAMES, yticklabels=CLASS_NAMES)
+    plt.xlabel('Predicted')
+    plt.ylabel('True')
+    plt.title('Confusion Matrix')
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, "confusion_matrix.png"))
+    plt.close()
+    
+    print(f"Plots saved to {output_dir}/")
 
-    return {
-        "loss": loss_sum / len(loader),
-        "acc": acc_sum / len(loader),
-        "precision": float(precision),
-        "recall": float(recall),
-        "f1": float(f1),
-        "cm": cm,
-        "misclassified": misclassified,
-    }
+def main():
+    parser = argparse.ArgumentParser(description="CIFAR-10 Training with ResNet50")
+    parser.add_argument("--epochs", type=int, default=15, help="Number of epochs")
+    parser.add_argument("--batch_size", type=int, default=256, help="Batch size")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--use_wandb", action="store_true", help="Use Weights & Biases for logging")
+    args = parser.parse_args()
 
-
-def plot_confusion_matrix(cm: np.ndarray, title: str) -> plt.Figure:
-    """Create confusion matrix figure."""
-    fig, ax = plt.subplots(figsize=(8, 8))
-    sns.heatmap(
-        cm,
-        annot=True,
-        fmt="d",
-        cmap="Blues",
-        xticklabels=CLASSES,
-        yticklabels=CLASSES,
-        ax=ax,
-    )
-    ax.set_xlabel("Predicted")
-    ax.set_ylabel("True")
-    ax.set_title(title)
-    fig.tight_layout()
-    return fig
-
-
-def ensure_dirs(cfg: Config) -> dict:
-    """Create output directories and return paths."""
-    out_dir = Path(cfg.out_dir)
-    fig_dir = out_dir / "figures"
-    ckpt_dir = out_dir / "checkpoints"
-    fig_dir.mkdir(parents=True, exist_ok=True)
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    return {"out": out_dir, "fig": fig_dir, "ckpt": ckpt_dir}
-
-
-def main() -> None:
-    args = parse_args()
-    cfg = Config(
-        epochs=args.epochs if args.epochs is not None else Config.epochs,
-        batch_size=args.batch_size if args.batch_size is not None else Config.batch_size,
-        seed=args.seed if args.seed is not None else Config.seed,
-    )
-
-    set_seed(cfg.seed)
-    device = get_device()
+    # シード固定
+    set_seed(args.seed)
+    
+    # デバイス設定
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
-    paths = ensure_dirs(cfg)
+    # WandB初期化
+    if args.use_wandb:
+        wandb.init(
+            project="cifar10-resnet-production",
+            config=vars(args),
+            name=f"resnet50_e{args.epochs}_b{args.batch_size}"
+        )
 
-    # W&B: enabled only when --use_wandb, otherwise disabled (no login required)
-    wandb_mode = "online" if args.use_wandb else "disabled"
-    run = wandb.init(
-        project="cifar10-resnet",
-        name="resnet50_v2_gpu_aug",
-        config=cfg.__dict__,
-        mode=wandb_mode,
-    )
+    # データ準備
+    train_transform, val_transform = get_transforms()
+    train_loader, val_loader = get_dataloaders(args.batch_size, train_transform, val_transform)
 
-    gpu_train_t, gpu_val_t = get_gpu_transforms(device)
-    train_loader, val_loader = get_dataloaders(cfg.batch_size, cfg.num_workers)
-
+    # モデル・損失関数・オプティマイザ・スケジューラ
     model = build_model(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=cfg.learning_rate, weight_decay=cfg.weight_decay)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg.epochs, eta_min=1e-6)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
 
-    log_path = paths["out"] / "log.csv"
+    # 学習ループ
+    train_losses, val_losses = [], []
+    train_accs, val_accs = [], []
+    best_acc = 0.0
 
-    with open(log_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["epoch", "lr", "train_loss", "train_acc", "val_loss", "val_acc", "val_f1"])
-
-        print("Start training...")
-
-        for epoch in range(cfg.epochs):
-            train_loss, train_acc = train_one_epoch(
-                model, train_loader, criterion, optimizer, gpu_train_t, device
-            )
-            scheduler.step()
-            lr = scheduler.get_last_lr()[0]
-
-            collect_imgs = args.log_images or (epoch == cfg.epochs - 1)
-            val_metrics = validate(
-                model,
-                val_loader,
-                criterion,
-                gpu_val_t,
-                device,
-                collect_misclassified=collect_imgs,
-                max_misclassified=32,
-            )
-
-            # CSV
-            writer.writerow([
-                epoch + 1,
-                lr,
-                train_loss,
-                train_acc,
-                val_metrics["loss"],
-                val_metrics["acc"],
-                val_metrics["f1"],
-            ])
-            f.flush()
-
-            # Console
-            print(
-                f"Epoch [{epoch+1}/{cfg.epochs}] "
-                f"LR: {lr:.2e} | "
-                f"Train Loss: {train_loss:.4f} Acc: {train_acc:.4f} | "
-                f"Val Loss: {val_metrics['loss']:.4f} Acc: {val_metrics['acc']:.4f} "
-                f"F1: {val_metrics['f1']:.4f}"
-            )
-
-            # Confusion matrix: W&Bなら送る / なければ保存
-            cm_fig = plot_confusion_matrix(val_metrics["cm"], title=f"Confusion Matrix (Epoch {epoch+1})")
-            if args.use_wandb:
-                cm_img = wandb.Image(cm_fig)
-            else:
-                cm_path = paths["fig"] / f"confusion_matrix_epoch_{epoch+1:03d}.png"
-                cm_fig.savefig(cm_path)
-                cm_img = None
-            plt.close(cm_fig)
-
-            # W&B Log
-            if args.use_wandb:
-                misclassified_wandb = [
-                    wandb.Image(img, caption=cap) for img, cap in val_metrics["misclassified"]
-                ]
-                wandb.log(
-                    {
-                        "epoch": epoch + 1,
-                        "lr": lr,
-                        "train/loss": train_loss,
-                        "train/acc": train_acc,
-                        "val/loss": val_metrics["loss"],
-                        "val/acc": val_metrics["acc"],
-                        "val/precision": val_metrics["precision"],
-                        "val/recall": val_metrics["recall"],
-                        "val/f1": val_metrics["f1"],
-                        "val/confusion_matrix": cm_img,
-                        "val/misclassified": misclassified_wandb,
-                    }
-                )
-
+    print("Start Training...")
+    for epoch in range(args.epochs):
+        train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
+        scheduler.step()
         
-    # Save model
-    save_path = paths["ckpt"] / cfg.save_name
-    torch.save(model.state_dict(), save_path)
-    print(f"Training finished. Model saved to: {save_path}")
+        # 修正: validateの返り値に合わせて受け取る変数の順序を変更
+        val_loss, val_acc, val_labels, val_preds = validate(model, val_loader, criterion, device)
+        
+        # 指標計算 (Precision, Recall, F1)
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            val_labels, val_preds, average='macro', zero_division=0
+        )
+        
+        train_losses.append(train_loss)
+        train_accs.append(train_acc)
+        val_losses.append(val_loss)
+        val_accs.append(val_acc)
+
+        print(f"Epoch [{epoch+1}/{args.epochs}] "
+              f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, "
+              f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}, "
+              f"F1: {f1:.4f}")
+
+        # W&Bログ
+        if args.use_wandb:
+            wandb.log({
+                "epoch": epoch + 1,
+                "train_loss": train_loss,
+                "train_acc": train_acc,
+                "val_loss": val_loss,
+                "val_acc": val_acc,
+                "val_precision": precision,
+                "val_recall": recall,
+                "val_f1": f1,
+                "lr": scheduler.get_last_lr()[0]
+            })
+
+        # ベストモデルの保存
+        if val_acc > best_acc:
+            best_acc = val_acc
+            os.makedirs("weights", exist_ok=True)
+            torch.save(model.state_dict(), "weights/best_model.pth")
+            print(f"  -> Best model saved with accuracy: {best_acc:.4f}")
+
+    # 最終結果のグラフ保存
+    # save_plotsは (all_labels, all_preds) の順で受け取るのでそのまま渡す
+    save_plots(train_losses, val_losses, train_accs, val_accs, val_labels, val_preds)
 
     if args.use_wandb:
-        wandb.save(str(save_path))
         wandb.finish()
-
+    
+    print("Training Finished.")
 
 if __name__ == "__main__":
     main()
